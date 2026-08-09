@@ -44,6 +44,12 @@ def subtitles_filename(language: str) -> str:
     return f"subtitles_{safe or 'auto'}.srt"
 
 
+def formatted_filename(language: str) -> str:
+    """按识别语言返回 AI 排版产物文件名：formatted_auto.md / formatted_zh-CN.md。"""
+    safe = _SAFE_FILE_CHARS.sub("_", (language or "auto").strip()).strip("._")
+    return f"formatted_{safe or 'auto'}.md"
+
+
 def _format_transcript(info: douyin.VideoInfo, text: str, language: str) -> str:
     return (
         f"# {info.title}\n\n"

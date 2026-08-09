@@ -196,13 +196,18 @@
         fetch('/api/format', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: state.transcript })
+            // 带 video_id/language，后端据此命中本地排版缓存，避免重复计费
+            body: JSON.stringify({
+                text: state.transcript,
+                video_id: (state.videoInfo && state.videoInfo.video_id) || '',
+                language: state.language
+            })
         }).then(function (r) { return r.json(); }).then(function (d) {
             if (d.success) {
                 state.formattedText = d.text;
                 state.currentView = 'formatted';
                 setTab();
-                toast('✨ 排版完成');
+                toast(d.from_cache ? '⚡ 命中排版缓存，秒回' : '✨ 排版完成');
             } else {
                 toast(d.error || '排版失败');
             }

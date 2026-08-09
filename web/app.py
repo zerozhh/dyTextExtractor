@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import hashlib
 import json
 import sys
 import threading
@@ -24,8 +25,8 @@ from pydantic import BaseModel
 import uvicorn
 
 from dy_extractor import douyin, pipeline
-from dy_extractor.ai_format import LLMError, format_transcript
-from dy_extractor.pipeline import subtitles_filename, transcript_filename
+from dy_extractor.ai_format import LLMError, build_formatted_file, format_transcript, read_formatted_file
+from dy_extractor.pipeline import formatted_filename, subtitles_filename, transcript_filename
 from dy_extractor.config import deepseek_configured, get_api_key, PROJECT_ROOT
 from dy_extractor.doubao_asr import DoubaoASRError
 
@@ -45,8 +46,10 @@ class VideoRequest(BaseModel):
 
 
 class FormatRequest(BaseModel):
-    """AI 排版请求模型"""
+    """AI 排版请求模型（video_id/language 用于定位排版产物缓存）"""
     text: str
+    video_id: str = ""
+    language: str = ""
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -164,19 +167,39 @@ async def extract_stream(req: VideoRequest):
 
 @app.post("/api/format")
 async def format_text(req: FormatRequest):
-    """AI 排版：用 DeepSeek V4 Flash 整理口播文案（只排版不改写）"""
+    """AI 排版：用 DeepSeek V4 Flash 整理口播文案（只排版不改写）。
+
+    排版结果是来源文案的确定性派生，落盘到 output/{video_id}/formatted_{lang}.md
+    （首行带来源 hash）。同文案再次排版直接命中磁盘缓存 from_cache=True，
+    不重复调用 DeepSeek；来源 hash 不匹配（文案已变）则自动重排覆盖。
+    """
     if not req.text.strip():
         return {"success": False, "error": "文案为空，无法排版"}
     if not deepseek_configured():
         return {"success": False, "error": "未配置 DEEPSEEK_API_KEY，请在 .env 中填写后重启服务"}
 
+    # 缓存定位：带来源 hash 的排版产物（video_id 非法或缺失则不缓存）
+    key = hashlib.md5(req.text.encode("utf-8")).hexdigest()
+    cache_path = None
+    if req.video_id and req.video_id.isdigit():
+        cache_path = OUTPUT_DIR / req.video_id / formatted_filename(req.language)
+
+    if cache_path is not None and cache_path.is_file() and cache_path.stat().st_size > 0:
+        body, stored_hash = read_formatted_file(cache_path.read_text(encoding="utf-8"))
+        if stored_hash == key:
+            return {"success": True, "text": body, "from_cache": True}
+
     try:
         formatted = await asyncio.to_thread(format_transcript, req.text)
-        return {"success": True, "text": formatted}
     except LLMError as e:
         return {"success": False, "code": e.code, "error": str(e)}
     except Exception as e:
         return {"success": False, "error": f"排版失败：{e}"}
+
+    if cache_path is not None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(build_formatted_file(req.text, formatted), encoding="utf-8")
+    return {"success": True, "text": formatted, "from_cache": False}
 
 
 # 允许下载的文件名白名单（语言相关的文案/字幕走 language 参数）

@@ -5,7 +5,13 @@
   可独立测试，命令行等其他入口也能复用；换模型只需改 .env。
 - 排版契约（见 _FORMAT_PROMPT）：只整理排版，不增删内容、不概括、不改写原意。
   它是「整理器」不是「改写器」。
+- 排版结果是来源文案的确定性派生（同文案 → 同排版），因此可缓存：本模块还负责
+  排版产物的「磁盘文件格式」（build/read），来源 hash 用于校验缓存与当前文案一致，
+  避免把旧文案的排版结果张冠李戴。
 """
+
+import hashlib
+from datetime import datetime
 
 import requests
 
@@ -14,6 +20,9 @@ from .config import (
     get_deepseek_base_url,
     get_deepseek_model,
 )
+
+# 排版产物首行的来源 hash 标记（<!-- source-hash:xxx · 排版于 ... -->）
+_SOURCE_HASH_PREFIX = "source-hash:"
 
 API_PATH = "/chat/completions"
 
@@ -99,3 +108,33 @@ def format_transcript(text: str) -> str:
         {"role": "user", "content": f"{_FORMAT_PROMPT}\n\n需要排版的文案：\n\"\"\"\n{text}\n\"\"\""},
     ]
     return _call_deepseek(messages)
+
+
+def _source_hash(text: str) -> str:
+    """来源文案的稳定指纹（md5，仅用于缓存去重，非安全用途）。"""
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+def build_formatted_file(source_text: str, formatted_text: str) -> str:
+    """把排版结果与来源文案指纹打包成可落盘的 md。
+
+    首行注释记录来源 hash 与排版时间；正文是排版后的完整文案。
+    """
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return (
+        f"<!-- {_SOURCE_HASH_PREFIX}{_source_hash(source_text)} · 排版于 {ts} -->\n\n"
+        f"{formatted_text}\n"
+    )
+
+
+def read_formatted_file(content: str) -> tuple[str, str]:
+    """从已保存的排版 md 中解析 (排版正文, 来源 hash)。
+
+    首行无来源标记（历史/异常文件）时返回空 hash，调用方据此判定缓存不可信。
+    """
+    first_line = (content.split("\n", 1)[0] or "").strip()
+    stored_hash = ""
+    if _SOURCE_HASH_PREFIX in first_line:
+        stored_hash = first_line.split(_SOURCE_HASH_PREFIX, 1)[1].split()[0].strip()
+    body = content.split("\n\n", 1)[1].strip() if "\n\n" in content else content.strip()
+    return body, stored_hash
