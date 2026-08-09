@@ -24,8 +24,8 @@ def get_api_key() -> str:
 
 
 def get_language() -> str:
-    """返回识别语言，默认 zh-CN"""
-    return os.getenv("DOUBAO_LANGUAGE", "zh-CN").strip() or "zh-CN"
+    """返回识别语言，默认 auto（自动识别语种，中英混合也能正确适配）"""
+    return os.getenv("DOUBAO_LANGUAGE", "auto").strip() or "auto"
 
 
 def get_resource_id() -> str:

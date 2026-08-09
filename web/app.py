@@ -40,6 +40,7 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 class VideoRequest(BaseModel):
     """视频请求模型"""
     url: str
+    language: str = ""  # 识别语言：auto/zh-CN/en-US；留空则用配置默认（auto）
 
 
 class FormatRequest(BaseModel):
@@ -96,7 +97,9 @@ async def get_info(req: VideoRequest):
 async def extract_transcript(req: VideoRequest):
     """完整流程：下载视频 + 提取音频 + 豆包识别文案 + 保存"""
     try:
-        result = await asyncio.to_thread(pipeline.extract, req.url, str(OUTPUT_DIR))
+        result = await asyncio.to_thread(
+            pipeline.extract, req.url, str(OUTPUT_DIR), None, req.language
+        )
         return {
             "success": True,
             "video_id": result["video_info"].video_id,
@@ -135,7 +138,7 @@ async def extract_stream(req: VideoRequest):
 
     def worker():
         try:
-            pipeline.extract(req.url, str(OUTPUT_DIR), progress=progress)
+            pipeline.extract(req.url, str(OUTPUT_DIR), progress=progress, language=req.language)
             loop.call_soon_threadsafe(queue.put_nowait, {"stage": "end"})
         except Exception as e:
             loop.call_soon_threadsafe(

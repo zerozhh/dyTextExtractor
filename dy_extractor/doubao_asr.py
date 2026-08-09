@@ -108,10 +108,13 @@ def _extract_text(response: requests.Response) -> str:
 def transcribe(
     api_key: str,
     audio_path: Path,
-    language: str = "zh-CN",
+    language: str = "auto",
     resource_id: str = RESOURCE_ID,
 ) -> str:
-    """识别本地音频文件，返回文案文本。"""
+    """识别本地音频文件，返回文案文本。
+
+    language: 语种代码，auto=自动识别，zh-CN=中文，en-US=英文，ja-JP=日文等。
+    """
     audio_bytes = audio_path.read_bytes()
     audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 

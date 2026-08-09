@@ -99,6 +99,21 @@
     .chip-btn:hover { background: var(--gray-100); }
     .chip-btn:disabled { opacity: .45; cursor: not-allowed; }
 
+    /* 识别语言：自定义下拉（触发按钮用 chip-btn，与粘贴/清空完全同尺寸） */
+    .dropdown { position: relative; display: inline-flex; }
+    .caret { font-size: 10px; color: var(--gray-400); }
+    .dropdown-menu {
+        position: absolute; top: calc(100% + 6px); left: 0; z-index: 100;
+        min-width: 170px; padding: 4px; background: #fff;
+        border: 1px solid var(--gray-200); border-radius: 10px; box-shadow: var(--shadow-card);
+    }
+    .dropdown-item {
+        display: block; width: 100%; border: none; background: none; text-align: left;
+        padding: 8px 12px; border-radius: 8px; font-size: 12px; color: var(--gray-600); cursor: pointer;
+    }
+    .dropdown-item:hover { background: var(--gray-100); }
+    .dropdown-item.active { color: var(--brand); background: rgba(13,148,136,.06); font-weight: 600; }
+
     /* 顶部工具条 */
     .toolbar-row { display: flex; gap: 12px; align-items: center; }
     .toolbar-row textarea { flex: 1; min-height: 64px; resize: none; }
@@ -305,6 +320,17 @@ c51 -9 77 3 85 40 7 33 -15 70 -41 70 -16 0 -245 90 -289 114 -39 21 -68 20
                 </button>
             </div>
             <div class="toolbar-tools">
+                <div class="dropdown" id="langDropdown">
+                    <button class="chip-btn" id="langBtn" type="button" title="识别语言"
+                        aria-haspopup="listbox" aria-expanded="false">
+                        <span>🌐 识别语言：</span><span id="langLabel">默认识别</span><span class="caret"> ▾</span>
+                    </button>
+                    <div class="dropdown-menu hidden" id="langMenu" role="listbox">
+                        <button class="dropdown-item active" type="button" data-lang="auto">默认识别</button>
+                        <button class="dropdown-item" type="button" data-lang="zh-CN">中文</button>
+                        <button class="dropdown-item" type="button" data-lang="en-US">英文</button>
+                    </div>
+                </div>
                 <button id="btnPaste" class="chip-btn" type="button">📋 粘贴</button>
                 <button id="btnClear" class="chip-btn" type="button">🗑 清空</button>
                 <button id="btnInfo" class="chip-btn" type="button" disabled>
@@ -450,6 +476,7 @@ c51 -9 77 3 85 40 7 33 -15 70 -41 70 -16 0 -245 90 -289 114 -39 21 -68 20
     // ---- 状态 ----
     var state = {
         url: '',
+        language: 'auto',   // 识别语言：auto/zh-CN/en-US
         loading: false,
         apiKeyConfigured: false,
         deepseekConfigured: false,
@@ -704,7 +731,7 @@ c51 -9 77 3 85 40 7 33 -15 70 -41 70 -16 0 -245 90 -289 114 -39 21 -68 20
         fetch('/api/extract/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: state.url })
+            body: JSON.stringify({ url: state.url, language: state.language })
         }).then(function (res) {
             if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
             var reader = res.body.getReader();
@@ -797,6 +824,34 @@ c51 -9 77 3 85 40 7 33 -15 70 -41 70 -16 0 -245 90 -289 114 -39 21 -68 20
         syncInput();
         toast('已清空');
     });
+
+    // ---- 识别语言下拉（自定义，保证与 chip-btn 完全对齐）----
+    var LANG_LABELS = { auto: '默认识别', 'zh-CN': '中文', 'en-US': '英文' };
+    function closeLangMenu() {
+        $('langMenu').classList.add('hidden');
+        $('langBtn').setAttribute('aria-expanded', 'false');
+    }
+    function setLanguage(v) {
+        state.language = v;
+        $('langLabel').textContent = LANG_LABELS[v] || v;
+        var items = document.querySelectorAll('#langMenu .dropdown-item');
+        for (var i = 0; i < items.length; i++) {
+            items[i].classList.toggle('active', items[i].getAttribute('data-lang') === v);
+        }
+        closeLangMenu();
+    }
+    $('langBtn').addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = $('langMenu').classList.toggle('hidden') === false;
+        $('langBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    var langItems = document.querySelectorAll('#langMenu .dropdown-item');
+    for (var j = 0; j < langItems.length; j++) {
+        langItems[j].addEventListener('click', function () {
+            setLanguage(this.getAttribute('data-lang'));
+        });
+    }
+    document.addEventListener('click', closeLangMenu);
 
     checkHealth();
     syncInput();

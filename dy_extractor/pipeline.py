@@ -57,6 +57,7 @@ def extract(
     share_link: str,
     output_dir: str = "output",
     progress: Optional[Callable] = None,
+    language: str = "",
 ) -> dict:
     """处理一个分享链接，保存视频/音频/文案到 output/{video_id}/。
 
@@ -68,13 +69,17 @@ def extract(
         - audio_ready 音频提取完成（可用 /api/media 播放）
         - done        识别完成（携带 text / from_cache）
     用于 WebUI 渐进式展示：视频/音频一就绪就推给前端，不必等 ASR 全部完成。
+
+    language: 识别语种，auto=自动识别 / zh-CN=中文 / en-US=英文 等。
+        传入非空值则优先使用；留空则回退到配置（DOUBAO_LANGUAGE，默认 auto）。
     """
     def emit(stage: str, **data):
         if progress:
             progress(stage, data)
 
     api_key = get_api_key()
-    language = get_language()
+    if not language:
+        language = get_language()  # 未显式指定时回退到配置（默认 auto）
     resource_id = get_resource_id()
 
     emit("parse")
