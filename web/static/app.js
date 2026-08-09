@@ -155,6 +155,13 @@
         state.currentView = 'original';
         $('resultTitle').textContent = d.title;
         $('dlText').href = '/api/download?video_id=' + d.video_id + '&file=transcript.md&language=' + encodeURIComponent(state.language);
+        // 字幕与文案同源：识别带时间轴才有字幕可下载
+        if (d.has_subtitles) {
+            $('dlSrt').classList.remove('hidden');
+            $('dlSrt').href = '/api/download?video_id=' + d.video_id + '&file=subtitles.srt&language=' + encodeURIComponent(state.language);
+        } else {
+            $('dlSrt').classList.add('hidden');
+        }
         $('emptyState').classList.add('hidden');
         $('resultCard').classList.remove('hidden');
         setTab();

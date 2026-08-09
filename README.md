@@ -12,6 +12,7 @@
 - 🎬 **无水印视频** — 解析分享链接，下载高清无水印原视频
 - 🎙️ **音频提取** — FFmpeg 一键抽取音频轨道
 - 📝 **豆包 Seed-ASR** — 自动转写口播文案，带标点与数字归一化
+- 🎞️ **SRT 字幕** — 识别同时产出带时间轴的逐句字幕（`subtitles_{语言}.srt`），可直接导入剪映 / PR / 字幕工具
 - ✨ **AI 排版** — DeepSeek V4 Flash 整理文案（自动分段、修标点、去口语填充词；只排版不改写）
 - ⚡ **渐进式展示** — 视频/音频一就绪立即在前端播放，无需等待识别完成
 - 💾 **历史缓存** — 同一视频重复提取秒回结果，支持断点续跑；文案按识别语言分文件缓存，中/英各取所需不互相覆盖
@@ -50,7 +51,7 @@ uv run python main.py "https://v.douyin.com/xxxxx"   # 直接传链接
 2. 点「提取文案」→ 左栏视频/音频就绪即可播放
 3. 识别完成后，点「✨ AI 排版」整理文案，可「复制」/「下载」
 
-产物保存到 `output/{视频ID}/`：`video.mp4` · `audio.mp3` · `transcript_{识别语言}.md`（如 `transcript_auto.md`、`transcript_zh-CN.md`；语言功能前的旧文件 `transcript.md` 在默认识别时仍可命中）。`output/.url_index.json` 记录链接→视频映射，重复链接提取零网络解析。
+产物保存到 `output/{视频ID}/`：`video.mp4` · `audio.mp3` · `transcript_{识别语言}.md` · `subtitles_{识别语言}.srt`（如 `transcript_auto.md`、`subtitles_zh-CN.srt`；语言功能前的旧文件 `transcript.md` 在默认识别时仍可命中）。`output/.url_index.json` 记录链接→视频映射，重复链接提取零网络解析。
 
 ## ❓ 常见问题
 

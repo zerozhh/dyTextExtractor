@@ -25,7 +25,7 @@ import uvicorn
 
 from dy_extractor import douyin, pipeline
 from dy_extractor.ai_format import LLMError, format_transcript
-from dy_extractor.pipeline import transcript_filename
+from dy_extractor.pipeline import subtitles_filename, transcript_filename
 from dy_extractor.config import deepseek_configured, get_api_key, PROJECT_ROOT
 from dy_extractor.doubao_asr import DoubaoASRError
 
@@ -179,8 +179,8 @@ async def format_text(req: FormatRequest):
         return {"success": False, "error": f"排版失败：{e}"}
 
 
-# 允许下载的文件名白名单
-_SAFE_FILES = {"video.mp4", "audio.mp3", "transcript.md"}
+# 允许下载的文件名白名单（语言相关的文案/字幕走 language 参数）
+_SAFE_FILES = {"video.mp4", "audio.mp3", "transcript.md", "subtitles.srt"}
 # 允许内联播放的文件
 _MEDIA_FILES = {"video.mp4", "audio.mp3"}
 
@@ -199,6 +199,21 @@ def _resolve_output_file(video_id: str, file: str) -> Path | None:
     candidates.append(f"{video_id}{Path(file).suffix}")  # 命名统一前存量
 
     for name in candidates:
+        path = folder / name
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+    return None
+
+
+def _resolve_subtitles_file(video_id: str, language: str = "") -> Path | None:
+    """解析字幕产物路径：显式语言优先，其次 auto；无存量命名无需 legacy 回退。"""
+    folder = OUTPUT_DIR / video_id
+    names = []
+    if language:
+        names.append(subtitles_filename(language))
+    names.append(subtitles_filename("auto"))
+
+    for name in names:
         path = folder / name
         if path.is_file() and path.stat().st_size > 0:
             return path
@@ -228,7 +243,7 @@ def _resolve_transcript_file(video_id: str, language: str = "") -> Path | None:
 
 @app.get("/api/download")
 async def download_file(video_id: str, file: str, language: str = ""):
-    """下载提取产物：video.mp4 / audio.mp3 / transcript.md（文案按识别语言）"""
+    """下载提取产物：video.mp4 / audio.mp3 / transcript.md / subtitles.srt（文案与字幕按识别语言）"""
     if not video_id.isdigit():
         raise HTTPException(status_code=400, detail="无效的视频 ID")
     if file not in _SAFE_FILES:
@@ -236,6 +251,8 @@ async def download_file(video_id: str, file: str, language: str = ""):
 
     if file == "transcript.md":
         path = _resolve_transcript_file(video_id, language)
+    elif file == "subtitles.srt":
+        path = _resolve_subtitles_file(video_id, language)
     else:
         path = _resolve_output_file(video_id, file)
     if path is None:

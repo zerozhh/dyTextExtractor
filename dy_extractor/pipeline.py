@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from . import audio, doubao_asr, douyin
 from .config import get_api_key, get_language, get_resource_id
 from .media import media_is_complete
+from .subtitles import to_srt
 
 # transcript.md 中文案正文的起始标记
 _CONTENT_MARKER = "## 文案内容\n\n"
@@ -35,6 +36,12 @@ def transcript_filename(language: str) -> str:
     """按识别语言返回文案缓存文件名：transcript_auto.md / transcript_zh-CN.md。"""
     safe = _SAFE_FILE_CHARS.sub("_", (language or "auto").strip()).strip("._")
     return f"transcript_{safe or 'auto'}.md"
+
+
+def subtitles_filename(language: str) -> str:
+    """按识别语言返回字幕文件名：subtitles_auto.srt / subtitles_zh-CN.srt。"""
+    safe = _SAFE_FILE_CHARS.sub("_", (language or "auto").strip()).strip("._")
+    return f"subtitles_{safe or 'auto'}.srt"
 
 
 def _format_transcript(info: douyin.VideoInfo, text: str, language: str) -> str:
@@ -175,8 +182,9 @@ def extract(
 
     video_path = out / "video.mp4"
     audio_path = out / "audio.mp3"
-    # 文案按识别语言分文件缓存：transcript_auto.md / transcript_zh-CN.md ...
+    # 文案与字幕按识别语言分文件：transcript_auto.md / subtitles_zh-CN.srt ...
     transcript_path = out / transcript_filename(language)
+    subtitles_path = out / subtitles_filename(language)
     # 语言功能上线前的存量命名；当时没有语言选项，都是默认识别，仅 auto 可命中
     legacy_path = out / "transcript.md"
 
@@ -188,20 +196,25 @@ def extract(
     if cached_transcript is not None:
         if _video_usable(video_path):
             text = _extract_text_body(cached_transcript.read_text(encoding="utf-8"))
+            # 存量数据（语言功能前）没有时间轴，无法凭空生成字幕 → 如实报 False
+            has_subtitles = _is_valid(subtitles_path)
             print(f"⚡ 命中历史记录，直接返回: {out}")
             # 产物文件已在历史目录里（可能为旧命名），仍通知前端可播放
             emit("video_ready", video_id=info.video_id, title=info.title)
             emit("audio_ready", video_id=info.video_id)
-            emit("done", video_id=info.video_id, title=info.title, text=text, from_cache=True)
+            emit("done", video_id=info.video_id, title=info.title, text=text,
+                 from_cache=True, has_subtitles=has_subtitles)
             return {
                 "video_info": info,
                 "video_path": str(video_path),
                 "audio_path": str(audio_path),
                 "transcript_path": str(cached_transcript),
+                "subtitles_path": str(subtitles_path),
                 "text": text,
                 "from_cache": True,
+                "has_subtitles": has_subtitles,
             }
-        # 源视频残缺 → 整份缓存（各语言文案、音频）都是基于残缺内容派生的，作废重跑
+        # 源视频残缺 → 整份缓存（各语言文案/字幕、音频）都是基于残缺内容派生的，作废重跑
         print(f"⚠️ 缓存中的视频不完整（{video_path.name}），作废整份缓存重新提取: {out}")
         shutil.rmtree(out, ignore_errors=True)
         out.mkdir(parents=True, exist_ok=True)
@@ -211,8 +224,10 @@ def extract(
         print(f"② 已存在完整视频，跳过下载: {video_path.name}")
     else:
         print(f"② 下载无水印视频: {info.title}")
-        # 视频将重新下载 → 它派生的音频与所有语言文案全部失效，一并清掉，避免张冠李戴
+        # 视频将重新下载 → 它派生的音频与所有语言文案/字幕全部失效，一并清掉，避免张冠李戴
         for p in out.glob("transcript*.md"):
+            p.unlink(missing_ok=True)
+        for p in out.glob("subtitles*.srt"):
             p.unlink(missing_ok=True)
         audio_path.unlink(missing_ok=True)
         video_path.unlink(missing_ok=True)
@@ -230,18 +245,25 @@ def extract(
     emit("audio_ready", video_id=info.video_id)
 
     print(f"④ 豆包语音识别中（语言: {language}，通常几十秒）...")
-    text = doubao_asr.transcribe(api_key, audio_path, language, resource_id)
+    asr = doubao_asr.transcribe(api_key, audio_path, language, resource_id)
 
-    print("⑤ 保存文案...")
-    transcript_path.write_text(_format_transcript(info, text, language), encoding="utf-8")
+    # 文案与字幕是同一次识别的两个视图，一次落盘两个产物
+    print("⑤ 保存文案与字幕...")
+    transcript_path.write_text(_format_transcript(info, asr.text, language), encoding="utf-8")
+    if asr.utterances:
+        subtitles_path.write_text(to_srt(asr.utterances), encoding="utf-8")
+    has_subtitles = bool(asr.utterances)
 
-    emit("done", video_id=info.video_id, title=info.title, text=text, from_cache=False)
+    emit("done", video_id=info.video_id, title=info.title, text=asr.text,
+         from_cache=False, has_subtitles=has_subtitles)
     print(f"✅ 完成，输出目录: {out}")
     return {
         "video_info": info,
         "video_path": str(video_path),
         "audio_path": str(audio_path),
         "transcript_path": str(transcript_path),
-        "text": text,
+        "subtitles_path": str(subtitles_path),
+        "text": asr.text,
         "from_cache": False,
+        "has_subtitles": has_subtitles,
     }

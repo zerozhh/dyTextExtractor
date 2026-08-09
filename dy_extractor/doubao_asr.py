@@ -7,7 +7,8 @@
         X-Api-Request-Id(UUID) + X-Api-Sequence: -1
 - 状态: 响应 Header X-Api-Status-Code:
         20000000=识别完成  20000001/20000002=仍在处理
-- 文本: 响应 body 的 result.text
+- 结果: 响应 body 的 result.text（聚合全文）+ result.utterances（逐句时间轴，
+        单位为毫秒，实测确认）；transcribe() 返回 AsrResult 结构化结果
 
 音频通过 audio.data(base64) 直接随请求体提交，抖音短视频的音频大小完全够用。
 """
@@ -15,6 +16,7 @@
 import base64
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -24,6 +26,27 @@ RESOURCE_ID = "volc.seedasr.auc"
 POLL_INTERVAL_SECONDS = 1.0
 TIMEOUT_SECONDS = 300.0
 UID = "dy-text-extractor"
+
+
+@dataclass
+class Utterance:
+    """ASR 识别出的一个带时间戳的句子（start/end 单位：毫秒）。"""
+
+    start_ms: int
+    end_ms: int
+    text: str
+
+
+@dataclass
+class AsrResult:
+    """一次语音识别的完整结果：聚合全文 + 逐句时间轴。
+
+    文案（transcript.md）与字幕（subtitles.srt）都是这份数据的视图。
+    这里只生产数据、不做格式化——渲染交给各消费方（subtitles 等）。
+    """
+
+    text: str
+    utterances: list[Utterance]
 
 
 class DoubaoASRError(RuntimeError):
@@ -89,20 +112,39 @@ def _ensure_ok(response: requests.Response, phase: str) -> None:
         raise DoubaoASRError(_friendly_error(code, detail), code=code)
 
 
-def _extract_text(response: requests.Response) -> str:
-    """从查询响应中提取识别文本。"""
+def _parse_result(response: requests.Response) -> AsrResult:
+    """从查询响应中解析结构化识别结果（聚合文本 + 逐句时间轴）。
+
+    utterances 的单位是毫秒（实测确认）；单条字段异常时跳过该条，
+    不拖垮整体。words 词级时间戳当前不消费。
+    """
     if not response.content:
         raise DoubaoASRError("识别结果为空")
     data = response.json()
 
     result = data.get("result")
     if isinstance(result, dict) and result.get("text"):
-        return str(result["text"]).strip()
+        text = str(result["text"]).strip()
+    elif data.get("text"):
+        text = str(data["text"]).strip()
+    else:
+        raise DoubaoASRError(f"识别结果中未找到文本: {str(data)[:500]}")
 
-    if data.get("text"):
-        return str(data["text"]).strip()
+    utterances: list[Utterance] = []
+    items = result.get("utterances") or [] if isinstance(result, dict) else []
+    for item in items:
+        try:
+            utterances.append(
+                Utterance(
+                    start_ms=int(item["start_time"]),
+                    end_ms=int(item["end_time"]),
+                    text=str(item.get("text", "")),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
 
-    raise DoubaoASRError(f"识别结果中未找到文本: {str(data)[:500]}")
+    return AsrResult(text=text, utterances=utterances)
 
 
 def transcribe(
@@ -110,8 +152,8 @@ def transcribe(
     audio_path: Path,
     language: str = "auto",
     resource_id: str = RESOURCE_ID,
-) -> str:
-    """识别本地音频文件，返回文案文本。
+) -> AsrResult:
+    """识别本地音频文件，返回结构化结果（聚合全文 + 逐句时间轴）。
 
     language: 语种代码，auto=自动识别，zh-CN=中文，en-US=英文，ja-JP=日文等。
     """
@@ -156,7 +198,7 @@ def transcribe(
         status = resp.headers.get("X-Api-Status-Code", "")
 
         if status == "20000000":
-            return _extract_text(resp)
+            return _parse_result(resp)
         if status in ("20000001", "20000002"):
             time.sleep(POLL_INTERVAL_SECONDS)
             continue
