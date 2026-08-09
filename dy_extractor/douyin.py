@@ -43,13 +43,22 @@ class VideoInfo:
     url: str  # 无水印视频直链
 
 
+def extract_share_url(share_text: str) -> str | None:
+    """从分享文本中提取第一个 URL；找不到则返回 None。
+
+    纯本地正则，不联网——URL 索引（.url_index.json）的 lookup/record
+    都依赖它把分享文本稳定地归一到同一个键。
+    """
+    urls = _URL_RE.findall(share_text or "")
+    return urls[0] if urls else None
+
+
 def parse_share_url(share_text: str) -> VideoInfo:
     """从分享文本中解析出无水印视频链接。"""
-    urls = _URL_RE.findall(share_text)
-    if not urls:
+    share_url = extract_share_url(share_text)
+    if not share_url:
         raise ValueError("未找到有效的分享链接")
 
-    share_url = urls[0]
     share_response = requests.get(share_url, headers=HEADERS, timeout=30)
     video_id = share_response.url.split("?")[0].strip("/").split("/")[-1]
     share_url = f"https://www.iesdouyin.com/share/video/{video_id}"

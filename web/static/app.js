@@ -154,7 +154,7 @@
         state.formattedText = '';
         state.currentView = 'original';
         $('resultTitle').textContent = d.title;
-        $('dlText').href = '/api/download?video_id=' + d.video_id + '&file=transcript.md';
+        $('dlText').href = '/api/download?video_id=' + d.video_id + '&file=transcript.md&language=' + encodeURIComponent(state.language);
         $('emptyState').classList.add('hidden');
         $('resultCard').classList.remove('hidden');
         setTab();

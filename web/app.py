@@ -25,6 +25,7 @@ import uvicorn
 
 from dy_extractor import douyin, pipeline
 from dy_extractor.ai_format import LLMError, format_transcript
+from dy_extractor.pipeline import transcript_filename
 from dy_extractor.config import deepseek_configured, get_api_key, PROJECT_ROOT
 from dy_extractor.doubao_asr import DoubaoASRError
 
@@ -204,15 +205,39 @@ def _resolve_output_file(video_id: str, file: str) -> Path | None:
     return None
 
 
+def _resolve_transcript_file(video_id: str, language: str = "") -> Path | None:
+    """解析文案产物路径（按识别语言 + 存量命名逐级回退）。
+
+    1. 现行约定：transcript_{lang}.md（用户显式选择的语言优先）
+    2. 语言功能前默认识别产物：transcript.md
+    3. 命名统一前的存量数据：{video_id}.md
+    """
+    folder = OUTPUT_DIR / video_id
+    names = []
+    if language:
+        names.append(transcript_filename(language))
+    names.append(transcript_filename("auto"))
+    names += ["transcript.md", f"{video_id}.md"]
+
+    for name in names:
+        path = folder / name
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+    return None
+
+
 @app.get("/api/download")
-async def download_file(video_id: str, file: str):
-    """下载提取产物：video.mp4 / audio.mp3 / transcript.md"""
+async def download_file(video_id: str, file: str, language: str = ""):
+    """下载提取产物：video.mp4 / audio.mp3 / transcript.md（文案按识别语言）"""
     if not video_id.isdigit():
         raise HTTPException(status_code=400, detail="无效的视频 ID")
     if file not in _SAFE_FILES:
         raise HTTPException(status_code=400, detail="无效的文件名")
 
-    path = _resolve_output_file(video_id, file)
+    if file == "transcript.md":
+        path = _resolve_transcript_file(video_id, language)
+    else:
+        path = _resolve_output_file(video_id, file)
     if path is None:
         raise HTTPException(status_code=404, detail="文件不存在，请先提取文案")
 
