@@ -1,0 +1,41 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ===== 依赖锁文件（如用 uv，可选择性提交 uv.lock）=====
+# uv.lock
+
+# ===== 配置与密钥 =====
+.env
+.env.*
+!.env.example
+*.pem
+
+# ===== 本地工具配置 =====
+.claude/
+.idea/
+.vscode/
+.DS_Store
+
+# ===== 测试（回归测试仅在本地使用，不入库）=====
+tests/
+
+# ===== 数据与产物 =====
+data/
+output/
+downloads/
+*.mp4
+*.mp3
+*.wav
+
+# ===== 日志 =====
+*.log
+logs/

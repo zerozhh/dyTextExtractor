@@ -1,0 +1,27 @@
+[project]
+name = "dy-text-extractor"
+version = "0.1.0"
+description = "抖音文案提取器：粘贴分享链接，提取无水印视频、音频和文案（豆包 Seed-ASR 识别 + DeepSeek AI 排版）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "包子", email = "zerozh@gmail.com" }]
+keywords = ["douyin", "抖音", "文案提取", "语音识别", "ASR", "字幕", "transcript"]
+dependencies = [
+    "requests>=2.31",
+    "ffmpeg-python>=0.2.0",
+    "python-dotenv>=1.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+]
+
+[project.scripts]
+dy-extract = "dy_extractor.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dy_extractor"]

@@ -1,0 +1,74 @@
+# 🎬 dyTextExtractor · 抖音文案提取器
+
+> 粘贴一个抖音分享链接，自动下载**无水印视频**、提取**音频**，用 **豆包 Seed-ASR** 识别**口播文案**，再用 **DeepSeek** 一键 **AI 排版**。
+
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/github/license/zerozhh/dyTextExtractor)](LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/zerozhh/dyTextExtractor)](https://github.com/zerozhh/dyTextExtractor/commits)
+[![Stars](https://img.shields.io/github/stars/zerozhh/dyTextExtractor)](https://github.com/zerozhh/dyTextExtractor)
+
+## ✨ 功能
+
+- 🎬 **无水印视频** — 解析分享链接，下载高清无水印原视频
+- 🎙️ **音频提取** — FFmpeg 一键抽取音频轨道
+- 📝 **豆包 Seed-ASR** — 自动转写口播文案，带标点与数字归一化
+- ✨ **AI 排版** — DeepSeek V4 Flash 整理文案（自动分段、修标点、去口语填充词；只排版不改写）
+- ⚡ **渐进式展示** — 视频/音频一就绪立即在前端播放，无需等待识别完成
+- 💾 **历史缓存** — 同一视频重复提取秒回结果，支持断点续跑
+- 🌐 **WebUI + CLI 双入口**
+
+## 🚀 快速开始
+
+**环境要求**：Python 3.10+ · [uv](https://docs.astral.sh/uv/) · FFmpeg（`brew install ffmpeg`）· 豆包 API Key（必需）· DeepSeek API Key（可选）
+
+```bash
+# 安装
+git clone https://github.com/zerozhh/dyTextExtractor.git
+cd dyTextExtractor
+uv sync
+
+# 配置密钥（.env 每项都有注释说明）
+cp .env.example .env
+# 编辑 .env，至少填入 DOUBAO_API_KEY；AI 排版可选填 DEEPSEEK_API_KEY
+
+# 启动 WebUI
+uv run python web/app.py
+# 浏览器打开 http://localhost:8080
+```
+
+命令行方式：
+
+```bash
+uv run python main.py                        # 交互式粘贴链接
+uv run python main.py "https://v.douyin.com/xxxxx"   # 直接传链接
+```
+
+## 📖 使用
+
+1. 复制抖音分享链接，点「📋 粘贴」填入
+2. 点「提取文案」→ 左栏视频/音频就绪即可播放
+3. 识别完成后，点「✨ AI 排版」整理文案，可「复制」/「下载」
+
+产物保存到 `output/{视频ID}/`：`video.mp4` · `audio.mp3` · `transcript.md`
+
+## ❓ 常见问题
+
+- **报错 `45000030`？** 未开通「录音文件识别」，到[火山引擎控制台](https://console.volcengine.com/speech/new/)开通后重试（前端有直达链接）
+- **看不到新功能？** 浏览器缓存了旧页面，`Cmd + Shift + R` 硬刷新
+- **FFmpeg 相关报错？** `brew install ffmpeg` 后重启服务
+
+## ⚠️ 免责声明
+
+仅供学习与研究，请遵守相关法律法规及平台规则。解析依赖抖音网页结构，平台改版后可能失效。
+
+## 🤝 贡献
+
+欢迎 PR 与 Issue：Fork → 修改 → Pull Request，较大改动建议先开 Issue 讨论。
+
+## 🙏 致谢
+
+[yzfly/douyin-mcp-server](https://github.com/yzfly/douyin-mcp-server) — 解析逻辑基于该项目改编（Apache-2.0，见 [LICENSE-APACHE](LICENSE-APACHE)）
+
+## 📄 License
+
+主体代码 [MIT](LICENSE) © 2026 包子 · `dy_extractor/douyin.py` 为 [Apache-2.0](LICENSE-APACHE)
