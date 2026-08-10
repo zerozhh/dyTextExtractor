@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>历史记录 - dyTextExtractor</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<main>
+    <div class="page-head">
+        <h2>📂 历史记录</h2>
+        <a id="btnBack" class="chip-btn hidden" href="/history" style="text-decoration:none;">← 返回列表</a>
+        <input id="searchInput" class="search-input" type="text" placeholder="按标题或视频ID搜索..." autocomplete="off">
+        <button id="btnRefresh" class="chip-btn" type="button">↻ 刷新</button>
+    </div>
+
+    <div id="historyList" class="history-list"></div>
+    <div id="historyEmpty" class="card empty hidden">
+        <div class="big-icon">📂</div>
+        <h3>暂无历史记录</h3>
+        <p>去「提取」页粘贴抖音链接，识别结果会出现在这里</p>
+    </div>
+
+    <!-- 详情面板 -->
+    <div id="detailPanel" class="card detail-panel hidden">
+        <div class="detail-head">
+            <h3 id="detailTitle"></h3>
+            <span class="muted" id="detailMeta"></span>
+            <button id="btnCloseDetail" class="chip-btn" type="button" style="margin-left:auto;">✕ 收起</button>
+        </div>
+        <div class="detail-body">
+            <div id="detailMedia"></div>
+            <div class="detail-files">
+                <h4>产物文件 <span class="muted">（改名仅限视频/音频/文案/字幕/AI排版产物，扩展名保留）</span></h4>
+                <div id="fileList"></div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer>dyTextExtractor · 仅供学习研究使用 · 请遵守相关法律法规</footer>
+
+<div id="toast">
+    <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+    <span id="toastText"></span>
+</div>
+
+<!-- 改名弹窗 -->
+<div id="renameModal" class="modal hidden">
+    <div class="modal-card">
+        <h3>重命名文件</h3>
+        <p class="muted" id="renameHint"></p>
+        <input id="renameInput" type="text" maxlength="200" autocomplete="off">
+        <div class="modal-actions">
+            <button id="btnRenameCancel" class="mini-btn gray" type="button">取消</button>
+            <button id="btnRenameOk" class="mini-btn red" type="button">确定</button>
+        </div>
+    </div>
+</div>
+
+<!-- 文本预览弹窗（md/srt 内容网页内查看） -->
+<div id="previewModal" class="modal hidden">
+    <div class="modal-card preview-card">
+        <div class="preview-head">
+            <h3 id="previewTitle"></h3>
+            <button id="btnPreviewClose" class="chip-btn" type="button">✕</button>
+        </div>
+        <div id="previewBody" class="preview-body"></div>
+    </div>
+</div>
+
+<script src="/static/history.js"></script>
+</body>
+</html>

@@ -27,6 +27,61 @@
         toastTimer = setTimeout(function () { $('toast').classList.remove('show'); }, 2000);
     }
 
+    // ---- 最近结果持久化：跨页面切换恢复 ----
+    // 第一性原理：提取状态活在页面内存里，切去历史页（整页跳转）会被卸载。
+    // 把已完成结果写入 localStorage，页面重载后自动恢复，切走再切回内容不丢。
+    var STORAGE_KEY = 'dy_extract_result';
+    function persistResult() {
+        if (!state.videoInfo || !state.transcript) return;
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                video_id: state.videoInfo.video_id,
+                title: state.videoInfo.title || '',
+                text: state.transcript,
+                has_subtitles: !!state.hasSubtitles,
+                language: state.language,
+                ts: Date.now()
+            }));
+        } catch (e) { /* 存储满/隐私模式等，忽略 */ }
+    }
+    function markInProgress() {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ in_progress: true, ts: Date.now() })); } catch (e) {}
+    }
+    function clearPersist() {
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    }
+    function restoreResult() {
+        var raw;
+        try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { return; }
+        if (!raw) return;
+        var d;
+        try { d = JSON.parse(raw); } catch (e) { return; }
+        if (d.in_progress) {
+            // 陈旧标记（>5 分钟）视为失效并清理，避免每次刷新误导 toast 反复出现
+            if (d.ts && (Date.now() - d.ts) > 5 * 60 * 1000) { clearPersist(); return; }
+            // 提取进行中切走：SSE 已断，但后端任务在后台线程继续跑，产物会落盘
+            toast('上次提取未完成，任务仍在后台处理；若已完成，重新提取会命中缓存秒回，或去「历史记录」查看');
+            return;
+        }
+        if (!d.video_id || !d.text) return;
+        state.videoInfo = { video_id: d.video_id, title: d.title };
+        state.transcript = d.text;
+        state.hasSubtitles = !!d.has_subtitles;
+        state.currentView = 'original';
+        // 回填持久化时的语言：否则非 auto 语言的结果，下载链接按 auto 查 → 404
+        if (d.language && LANG_LABELS[d.language]) {
+            state.language = d.language;
+            $('langLabel').textContent = LANG_LABELS[d.language];
+        }
+        finishExtract({
+            video_id: d.video_id, title: d.title, text: d.text,
+            has_subtitles: !!d.has_subtitles, from_cache: true
+        });
+        showVideo({ video_id: d.video_id, title: d.title });
+        showAudio({ video_id: d.video_id });
+        toast('已恢复上次提取结果');
+    }
+
     // ---- 健康检查 ----
     function checkHealth() {
         fetch('/api/health').then(function (r) { return r.json(); }).then(function (d) {
@@ -41,6 +96,7 @@
                 $('apiBadgeText').textContent = 'API 未配置';
                 $('apiNotice').classList.remove('hidden');
             }
+            syncInput();  // 健康检查完成后再算按钮可用性，防竞态锁死提取按钮
         }).catch(function () {
             $('apiBadgeText').textContent = '服务异常';
         });
@@ -177,6 +233,7 @@
         state.transcript = d.text;
         state.formattedText = '';
         state.currentView = 'original';
+        state.hasSubtitles = !!d.has_subtitles;
         $('resultTitle').textContent = d.title;
         $('dlText').href = '/api/download?video_id=' + d.video_id + '&file=transcript.md&language=' + encodeURIComponent(state.language);
         // 字幕与文案同源：识别带时间轴才有字幕可下载
@@ -196,6 +253,7 @@
             $('cacheBadge').classList.add('hidden');
             toast('文案提取成功');
         }
+        persistResult();
     }
 
     // 切换 原始/AI排版 视图
@@ -278,6 +336,7 @@
                     break;
                 case 'error':
                     hideLoading();
+                    clearPersist();  // 失败不残留「进行中」标记
                     showError(d.message || '提取失败', d.code);
                     break;
             }
@@ -289,6 +348,8 @@
         if (!state.apiKeyConfigured) { toast('请先配置 API Key'); return; }
 
         resetState();
+        clearPersist();
+        markInProgress();
         state.lastAction = 'extract';
         state.loading = true;
         syncInput();
@@ -321,6 +382,7 @@
             return pump();
         }).catch(function () {
             hideLoading();
+            clearPersist();  // 网络中断等失败不残留「进行中」标记
             showError('网络错误，请检查服务是否运行');
         }).finally(function () {
             state.loading = false;
@@ -404,6 +466,7 @@
     // 清空按钮：清空输入框并重置界面
     $('btnClear').addEventListener('click', function () {
         urlInput.value = '';
+        clearPersist();
         resetState();
         syncInput();
         toast('已清空');
@@ -439,4 +502,5 @@
 
     checkHealth();
     syncInput();
+    restoreResult();
 })();
