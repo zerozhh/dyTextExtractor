@@ -15,21 +15,8 @@
     </symbol>
 </svg>
 
-<nav>
-    <div class="nav-inner">
-        <div class="brand">
-            <img class="logo-img" src="/static/favicon.svg" alt="dyTextExtractor" width="40" height="40">
-            <div>
-                <h1>dyTextExtractor</h1>
-                <p>抖音文案提取器</p>
-            </div>
-        </div>
-        <div id="apiBadge" class="status-badge off">
-            <span class="dot"></span>
-            <span id="apiBadgeText">检测中...</span>
-        </div>
-    </div>
-</nav>
+{% set apiBadge = True %}
+{% include "_nav.html" %}
 
 <main>
     <!-- 顶部工具条：链接输入（跨全宽） -->

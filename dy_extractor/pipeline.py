@@ -19,6 +19,7 @@ from typing import Callable, Optional
 
 from . import audio, doubao_asr, douyin
 from .config import get_api_key, get_app_id, get_access_token, get_language, get_resource_id
+from .manifest import resolve, reset_logic_file, clear_logic_prefix
 from .media import media_is_complete
 from .subtitles import to_srt
 
@@ -27,6 +28,10 @@ _CONTENT_MARKER = "## 文案内容\n\n"
 
 # 本地链接解析缓存：{分享链接: 视频信息}，让重复链接命中缓存时零网络解析
 _URL_INDEX_NAME = ".url_index.json"
+
+# .url_index.json 全局写锁：跨请求互斥（_UrlIndex 每请求新建实例，实例锁不互斥；
+# 删除路径的 _remove_from_url_index 也共用此锁），防并发写丢条目/临时文件互踩。
+url_index_lock = threading.Lock()
 
 # 语言值会用作文件名（如 transcript_zh-CN.md），清洗掉路径非法字符
 _SAFE_FILE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -95,7 +100,7 @@ class _UrlIndex:
 
     def __init__(self, output_dir: str):
         self.path = Path(output_dir) / _URL_INDEX_NAME
-        self._lock = threading.Lock()
+        self._lock = url_index_lock  # 全局单例锁（见上方注释）
 
     def _read(self) -> dict:
         try:
@@ -188,18 +193,15 @@ def extract(
     out = Path(output_dir) / info.video_id
     out.mkdir(parents=True, exist_ok=True)
 
-    video_path = out / "video.mp4"
-    audio_path = out / "audio.mp3"
+    # 产物路径统一走逻辑层：用户改名后 resolve 仍能定位实际文件（缓存命中/断点续跑不受影响）
+    video_path = resolve(out, "video.mp4")
+    audio_path = resolve(out, "audio.mp3")
     # 文案与字幕按识别语言分文件：transcript_auto.md / subtitles_zh-CN.srt ...
-    transcript_path = out / transcript_filename(language)
-    subtitles_path = out / subtitles_filename(language)
-    # 语言功能上线前的存量命名；当时没有语言选项，都是默认识别，仅 auto 可命中
-    legacy_path = out / "transcript.md"
+    transcript_path = resolve(out, transcript_filename(language))
+    subtitles_path = resolve(out, subtitles_filename(language))
 
     # === 缓存命中：本语言的文案已存在。但缓存只在源视频完整时可信任 ===
     cached_transcript = transcript_path if _is_valid(transcript_path) else None
-    if cached_transcript is None and language == "auto":
-        cached_transcript = legacy_path if _is_valid(legacy_path) else None
 
     if cached_transcript is not None:
         if _video_usable(video_path):
@@ -232,13 +234,16 @@ def extract(
         print(f"② 已存在完整视频，跳过下载: {video_path.name}")
     else:
         print(f"② 下载无水印视频: {info.title}")
-        # 视频将重新下载 → 它派生的音频与所有语言文案/字幕全部失效，一并清掉，避免张冠李戴
-        for p in out.glob("transcript*.md"):
-            p.unlink(missing_ok=True)
-        for p in out.glob("subtitles*.srt"):
-            p.unlink(missing_ok=True)
+        # 视频将重新下载 → 它派生的音频与所有语言文案/字幕全部失效，一并清掉，避免张冠李戴。
+        # 用 manifest 反查删除改名文件——前缀 glob（transcript*.md）匹配不到改名后的实际名，
+        # 漏删会让基于损坏视频的过期派生内容在缓存命中时被错误返回。
+        clear_logic_prefix(out, "transcript")
+        clear_logic_prefix(out, "subtitles")
         audio_path.unlink(missing_ok=True)
         video_path.unlink(missing_ok=True)
+        # 重新下载 → 写回逻辑名 video.mp4，清除用户改名的映射（若有）
+        reset_logic_file(out, "video.mp4")
+
         def _on_download_progress(written, total):
             percent = int(written * 100 / total) if total else None
             emit("download", downloaded=written, total=total, percent=percent)
@@ -253,6 +258,7 @@ def extract(
         print(f"③ 已存在音频，跳过提取: {audio_path.name}")
     else:
         print("③ 用 FFmpeg 提取音频...")
+        reset_logic_file(out, "audio.mp3")  # 重新提取 → 写回逻辑名
         audio_path = audio.extract_audio(video_path, out)
     emit("audio_ready", video_id=info.video_id)
 
@@ -262,10 +268,15 @@ def extract(
     )
 
     # 文案与字幕是同一次识别的两个视图，一次落盘两个产物
+    # 全新写入 → 写回逻辑名，清除用户改名的映射（若有）
     print("⑤ 保存文案与字幕...")
-    transcript_path.write_text(_format_transcript(info, asr.text, language), encoding="utf-8")
+    transcript_name = transcript_filename(language)
+    subtitles_name = subtitles_filename(language)
+    reset_logic_file(out, transcript_name)
+    reset_logic_file(out, subtitles_name)
+    (out / transcript_name).write_text(_format_transcript(info, asr.text, language), encoding="utf-8")
     if asr.utterances:
-        subtitles_path.write_text(to_srt(asr.utterances), encoding="utf-8")
+        (out / subtitles_name).write_text(to_srt(asr.utterances), encoding="utf-8")
     has_subtitles = bool(asr.utterances)
 
     emit("done", video_id=info.video_id, title=info.title, text=asr.text,
