@@ -376,14 +376,29 @@
 
     // 粘贴按钮：读取剪贴板并填入输入框
     $('btnPaste').addEventListener('click', function () {
-        navigator.clipboard.readText().then(function (text) {
-            if (!text) { toast('剪贴板为空'); return; }
-            urlInput.value = text;
-            syncInput();
-            toast('已粘贴剪贴板内容');
-        }).catch(function () {
-            toast('无法读取剪贴板，请手动粘贴');
-        });
+        // 第一性原理：Clipboard API 仅在「安全上下文」可用（HTTPS / localhost /
+        // 127.0.0.1）。通过局域网 IP + HTTP 访问页面时 navigator.clipboard 是
+        // undefined，readText() 会同步抛 TypeError——旧的 .catch() 捕获不到，
+        // 表现为「点击无任何效果」。故先做特性检测。
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(function (text) {
+                if (!text) { toast('剪贴板为空'); return; }
+                urlInput.value = text;
+                syncInput();
+                toast('已粘贴剪贴板内容');
+            }).catch(function () {
+                toast('无法读取剪贴板，请手动粘贴');
+            });
+            return;
+        }
+        // 非安全上下文：先试 execCommand（用户激活的 click 中部分浏览器仍支持），
+        // 不行就聚焦输入框，让用户直接 ⌘+V——浏览器模型下最顺的降级路径。
+        var ok = false;
+        try { ok = document.execCommand('paste'); } catch (e) { ok = false; }
+        if (!ok) {
+            urlInput.focus();
+            toast('浏览器禁止网页读取剪贴板，已聚焦输入框，请按 ⌘+V 粘贴');
+        }
     });
 
     // 清空按钮：清空输入框并重置界面
