@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import audio, doubao_asr, douyin
-from .config import get_api_key, get_language, get_resource_id
+from .config import get_api_key, get_app_id, get_access_token, get_language, get_resource_id
 from .media import media_is_complete
 from .subtitles import to_srt
 
@@ -175,6 +175,8 @@ def extract(
             progress(stage, data)
 
     api_key = get_api_key()
+    app_id = get_app_id()
+    access_token = get_access_token()
     if not language:
         language = get_language()  # 未显式指定时回退到配置（默认 auto）
     resource_id = get_resource_id()
@@ -251,7 +253,9 @@ def extract(
     emit("audio_ready", video_id=info.video_id)
 
     print(f"④ 豆包语音识别中（语言: {language}，通常几十秒）...")
-    asr = doubao_asr.transcribe(api_key, audio_path, language, resource_id)
+    asr = doubao_asr.transcribe(
+        api_key, audio_path, language, resource_id, app_id=app_id, access_token=access_token
+    )
 
     # 文案与字幕是同一次识别的两个视图，一次落盘两个产物
     print("⑤ 保存文案与字幕...")

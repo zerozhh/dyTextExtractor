@@ -57,14 +57,25 @@ class DoubaoASRError(RuntimeError):
         self.code = code
 
 
-def _headers(api_key: str, request_id: str, resource_id: str) -> dict:
-    return {
+def _headers(api_key: str, app_id: str, access_token: str, request_id: str, resource_id: str) -> dict:
+    """构造豆包语音鉴权头，兼容新旧控制台两种凭据（二选一）：
+
+    - 双头（旧版控制台）：配齐 DOUBAO_APP_ID + DOUBAO_ACCESS_TOKEN 时，
+      用 X-Api-App-Key + X-Api-Access-Key；
+    - 单头（新版控制台）：否则用 X-Api-Key。
+    """
+    headers = {
         "Content-Type": "application/json",
-        "X-Api-Key": api_key,
         "X-Api-Resource-Id": resource_id,
         "X-Api-Request-Id": request_id,
         "X-Api-Sequence": "-1",
     }
+    if app_id and access_token:
+        headers["X-Api-App-Key"] = app_id
+        headers["X-Api-Access-Key"] = access_token
+    else:
+        headers["X-Api-Key"] = api_key
+    return headers
 
 
 def _parse_error_code(response: requests.Response) -> str:
@@ -152,16 +163,20 @@ def transcribe(
     audio_path: Path,
     language: str = "auto",
     resource_id: str = RESOURCE_ID,
+    app_id: str = "",
+    access_token: str = "",
 ) -> AsrResult:
     """识别本地音频文件，返回结构化结果（聚合全文 + 逐句时间轴）。
 
     language: 语种代码，auto=自动识别，zh-CN=中文，en-US=英文，ja-JP=日文等。
+    鉴权二选一：传 app_id + access_token 走旧版双头（X-Api-App-Key +
+    X-Api-Access-Key）；否则用 api_key 新版单头（X-Api-Key）。
     """
     audio_bytes = audio_path.read_bytes()
     audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 
     request_id = str(uuid.uuid4())
-    headers = _headers(api_key, request_id, resource_id)
+    headers = _headers(api_key, app_id, access_token, request_id, resource_id)
 
     submit_body = {
         "user": {"uid": UID},

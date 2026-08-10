@@ -13,14 +13,29 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 
 def get_api_key() -> str:
-    """返回豆包语音 API Key，未配置则抛错"""
+    """返回豆包语音 API Key（新版控制台单头鉴权 X-Api-Key）。
+
+    未配置 API Key 时：若已配齐 appid+token 双头凭据（DOUBAO_APP_ID +
+    DOUBAO_ACCESS_TOKEN）则返回空串——双头鉴权已足够；否则抛错。
+    """
     key = os.getenv("DOUBAO_API_KEY", "").strip()
-    if not key:
+    if not key and not (get_app_id() and get_access_token()):
         raise RuntimeError(
-            "未配置 DOUBAO_API_KEY。请把 .env.example 复制为 .env 并填入密钥，"
-            "或设置环境变量 DOUBAO_API_KEY。"
+            "未配置豆包语音凭据。二选一："
+            "① 新版控制台 → 配置 DOUBAO_API_KEY（单头鉴权）；"
+            "② 旧版控制台 → 配置 DOUBAO_APP_ID + DOUBAO_ACCESS_TOKEN（双头鉴权）。"
         )
     return key
+
+
+def get_app_id() -> str:
+    """返回豆包语音 APP ID（旧版控制台双头鉴权 X-Api-App-Key），未配置返回空串。"""
+    return os.getenv("DOUBAO_APP_ID", "").strip()
+
+
+def get_access_token() -> str:
+    """返回豆包语音 Access Token（旧版控制台双头鉴权 X-Api-Access-Key），未配置返回空串。"""
+    return os.getenv("DOUBAO_ACCESS_TOKEN", "").strip()
 
 
 def get_language() -> str:

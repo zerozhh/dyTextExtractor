@@ -31,7 +31,8 @@ uv sync
 
 # 配置密钥（.env 每项都有注释说明）
 cp .env.example .env
-# 编辑 .env，至少填入 DOUBAO_API_KEY；AI 排版可选填 DEEPSEEK_API_KEY
+# 编辑 .env：豆包凭据二选一——新版控制台填 DOUBAO_API_KEY（单头），
+# 旧版控制台填 DOUBAO_APP_ID + DOUBAO_ACCESS_TOKEN（双头）；AI 排版可选填 DEEPSEEK_API_KEY
 
 # 启动 WebUI（默认监听 0.0.0.0，局域网内其他设备可访问）
 uv run python web/app.py
