@@ -33,9 +33,11 @@ uv sync
 cp .env.example .env
 # 编辑 .env，至少填入 DOUBAO_API_KEY；AI 排版可选填 DEEPSEEK_API_KEY
 
-# 启动 WebUI
+# 启动 WebUI（默认监听 0.0.0.0，局域网内其他设备可访问）
 uv run python web/app.py
-# 浏览器打开 http://localhost:8080
+# 本机打开 http://localhost:8080
+# 同局域网设备打开 http://<本机IP>:8080（如 http://192.168.1.210:8080）
+# 只想本机访问时：uv run python web/app.py 127.0.0.1
 ```
 
 命令行方式：

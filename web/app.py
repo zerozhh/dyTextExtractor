@@ -3,8 +3,9 @@
 
 启动方式:
     cd dyTextExtractor
-    uv run python web/app.py
-    # 访问 http://localhost:8080
+    uv run python web/app.py            # 默认 0.0.0.0:8080，局域网可访问
+    uv run python web/app.py 127.0.0.1  # 只允许本机访问
+    uv run python web/app.py 0.0.0.0 9000  # 指定 host 和 port
 """
 
 import asyncio
@@ -302,9 +303,10 @@ async def media_file(video_id: str, file: str):
 
 def main():
     """启动服务"""
-    host = "127.0.0.1"
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
-    print("🚀 dyTextExtractor WebUI 已启动: http://localhost:%d" % port)
+    # 默认 0.0.0.0 监听所有网卡，局域网内其他设备可通过 http://<本机IP>:8080 访问
+    host = sys.argv[1] if len(sys.argv) > 1 else "0.0.0.0"
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
+    print("🚀 dyTextExtractor WebUI 已启动: http://localhost:%d （局域网访问: http://<本机IP>:%d）" % (port, port))
     uvicorn.run(app, host=host, port=port)
 
 
