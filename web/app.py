@@ -11,6 +11,8 @@
 import asyncio
 import hashlib
 import json
+import re
+import shutil
 import sys
 import threading
 from pathlib import Path
@@ -22,12 +24,12 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
-from dy_extractor import douyin, pipeline
+from dy_extractor import douyin, manifest, pipeline
 from dy_extractor.ai_format import LLMError, build_formatted_file, format_transcript, read_formatted_file
-from dy_extractor.pipeline import formatted_filename, subtitles_filename, transcript_filename
+from dy_extractor.pipeline import formatted_filename, subtitles_filename, transcript_filename, url_index_lock
 from dy_extractor.config import deepseek_configured, get_api_key, PROJECT_ROOT
 from dy_extractor.doubao_asr import DoubaoASRError
 
@@ -42,15 +44,15 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 
 class VideoRequest(BaseModel):
     """视频请求模型"""
-    url: str
-    language: str = ""  # 识别语言：auto/zh-CN/en-US；留空则用配置默认（auto）
+    url: str = Field(max_length=4096)  # 上限防超大 body DoS
+    language: str = Field(default="", max_length=64)  # 识别语言：auto/zh-CN/en-US；留空则用配置默认（auto）
 
 
 class FormatRequest(BaseModel):
     """AI 排版请求模型（video_id/language 用于定位排版产物缓存）"""
-    text: str
-    video_id: str = ""
-    language: str = ""
+    text: str = Field(max_length=1_000_000)  # 文案上限，防超大 body DoS
+    video_id: str = Field(default="", max_length=32)
+    language: str = Field(default="", max_length=64)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -179,11 +181,15 @@ async def format_text(req: FormatRequest):
     if not deepseek_configured():
         return {"success": False, "error": "未配置 DEEPSEEK_API_KEY，请在 .env 中填写后重启服务"}
 
-    # 缓存定位：带来源 hash 的排版产物（video_id 非法或缺失则不缓存）
+    # 缓存定位：带来源 hash 的排版产物（video_id 目录不存在则不缓存——
+    # 防止任意数字 video_id 无授权建目录污染历史列表）
     key = hashlib.md5(req.text.encode("utf-8")).hexdigest()
     cache_path = None
+    format_folder = None
     if req.video_id and req.video_id.isdigit():
-        cache_path = OUTPUT_DIR / req.video_id / formatted_filename(req.language)
+        format_folder = OUTPUT_DIR / req.video_id
+        if format_folder.is_dir() and not format_folder.is_symlink():
+            cache_path = manifest.resolve(format_folder, formatted_filename(req.language))
 
     if cache_path is not None and cache_path.is_file() and cache_path.stat().st_size > 0:
         body, stored_hash = read_formatted_file(cache_path.read_text(encoding="utf-8"))
@@ -198,6 +204,9 @@ async def format_text(req: FormatRequest):
         return {"success": False, "error": f"排版失败：{e}"}
 
     if cache_path is not None:
+        # 写入前走 manifest：若用户改过 formatted 名，reset 后写回逻辑名保持一致
+        manifest.reset_logic_file(format_folder, formatted_filename(req.language))
+        cache_path = manifest.resolve(format_folder, formatted_filename(req.language))
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(build_formatted_file(req.text, formatted), encoding="utf-8")
     return {"success": True, "text": formatted, "from_cache": False}
@@ -210,59 +219,103 @@ _MEDIA_FILES = {"video.mp4", "audio.mp3"}
 
 
 def _resolve_output_file(video_id: str, file: str) -> Path | None:
-    """解析产物文件的真实路径（按已知命名逐级回退）。
-
-    1. 现行约定：video.mp4 / audio.mp3 / transcript.md
-    2. 历史 bug：音频曾被按视频名派生为 video.mp3
-    3. 命名统一前的存量数据：{video_id}.mp4 / .mp3
-    """
+    """解析产物文件的真实路径：经逻辑层（manifest 记录用户改名）定位。"""
     folder = OUTPUT_DIR / video_id
-    candidates = [file]
-    if file == "audio.mp3":
-        candidates.append("video.mp3")  # 历史 bug 产物
-    candidates.append(f"{video_id}{Path(file).suffix}")  # 命名统一前存量
-
-    for name in candidates:
-        path = folder / name
-        if path.is_file() and path.stat().st_size > 0:
-            return path
+    if not folder.is_dir():
+        return None
+    path = manifest.resolve(folder, file)
+    if path.is_file() and path.stat().st_size > 0:
+        return path
     return None
 
 
 def _resolve_subtitles_file(video_id: str, language: str = "") -> Path | None:
-    """解析字幕产物路径：显式语言优先，其次 auto；无存量命名无需 legacy 回退。"""
+    """解析字幕产物路径：显式语言优先，其次 auto；再兜底 manifest 任意语言字幕
+    （改名后语言不可推断时，保证历史页下载不 404）。"""
     folder = OUTPUT_DIR / video_id
+    if not folder.is_dir():
+        return None
     names = []
     if language:
         names.append(subtitles_filename(language))
     names.append(subtitles_filename("auto"))
 
     for name in names:
-        path = folder / name
+        path = manifest.resolve(folder, name)
         if path.is_file() and path.stat().st_size > 0:
             return path
+    for logic, actual in manifest.read_manifest(folder).items():
+        if logic.startswith("subtitles_"):
+            path = folder / actual
+            if path.is_file() and path.stat().st_size > 0:
+                return path
     return None
 
 
 def _resolve_transcript_file(video_id: str, language: str = "") -> Path | None:
-    """解析文案产物路径（按识别语言 + 存量命名逐级回退）。
-
-    1. 现行约定：transcript_{lang}.md（用户显式选择的语言优先）
-    2. 语言功能前默认识别产物：transcript.md
-    3. 命名统一前的存量数据：{video_id}.md
-    """
+    """解析文案产物路径：显式语言优先，其次 auto；再兜底 manifest 任意语言文案
+    （改名后语言不可推断时，保证历史页下载不 404）。"""
     folder = OUTPUT_DIR / video_id
+    if not folder.is_dir():
+        return None
     names = []
     if language:
         names.append(transcript_filename(language))
     names.append(transcript_filename("auto"))
-    names += ["transcript.md", f"{video_id}.md"]
 
     for name in names:
-        path = folder / name
+        path = manifest.resolve(folder, name)
         if path.is_file() and path.stat().st_size > 0:
             return path
+    for logic, actual in manifest.read_manifest(folder).items():
+        if logic.startswith("transcript_"):
+            path = folder / actual
+            if path.is_file() and path.stat().st_size > 0:
+                return path
     return None
+
+
+def _resolve_formatted_file(video_id: str, language: str = "") -> Path | None:
+    """解析 AI 排版产物路径：语言优先，其次 auto；再兜底 manifest 任意 formatted（改名可定位）。"""
+    folder = OUTPUT_DIR / video_id
+    if not folder.is_dir():
+        return None
+    name = formatted_filename(language or "auto")
+    path = manifest.resolve(folder, name)
+    if path.is_file() and path.stat().st_size > 0:
+        return path
+    for logic, actual in manifest.read_manifest(folder).items():
+        if logic.startswith("formatted_"):
+            path = folder / actual
+            if path.is_file() and path.stat().st_size > 0:
+                return path
+    return None
+
+
+# 允许网页内预览的文本产物（文案/字幕/AI排版）
+_SAFE_TEXT_FILES = {"transcript.md", "subtitles.srt", "formatted.md"}
+
+
+@app.get("/api/content")
+async def content_file(video_id: str, file: str, language: str = ""):
+    """文本产物内容预览：文案/字幕/AI排版在网页内直接查看，无需下载。"""
+    if not video_id.isdigit():
+        raise HTTPException(status_code=400, detail="无效的视频 ID")
+    if file not in _SAFE_TEXT_FILES:
+        raise HTTPException(status_code=400, detail="无效的文件名")
+    if file == "transcript.md":
+        path = _resolve_transcript_file(video_id, language)
+    elif file == "subtitles.srt":
+        path = _resolve_subtitles_file(video_id, language)
+    else:
+        path = _resolve_formatted_file(video_id, language)
+    if path is None:
+        raise HTTPException(status_code=404, detail="文件不存在，请先提取文案")
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        raise HTTPException(status_code=500, detail="读取失败")
+    return {"success": True, "name": path.name, "text": text}
 
 
 @app.get("/api/download")
@@ -299,6 +352,158 @@ async def media_file(video_id: str, file: str):
 
     media_type = "video/mp4" if file == "video.mp4" else "audio/mpeg"
     return FileResponse(path, media_type=media_type)
+
+
+# ===== 历史记录：WebUI 内回看与管理 =====
+# 第一性原理：查找应发生在网页内，而非翻文件系统。数据源直接扫描 output/
+# 数字目录（磁盘为准），标题/链接从 .url_index.json 反查。产物清单展示磁盘
+# 实际文件名；可改名文件附带逻辑名（经 manifest 反查）供改名入口用。
+
+
+class RenameRequest(BaseModel):
+    """历史产物改名请求：name 为当前实际文件名，newName 为新文件名。"""
+    name: str
+    newName: str
+
+
+def _load_title_index() -> dict:
+    """一次性读 .url_index.json → {video_id: (title, share_url)}。
+
+    避免逐记录全量读+遍历（O(n²)），供历史扫描复用。
+    """
+    lookup = {}
+    try:
+        data = json.loads((OUTPUT_DIR / ".url_index.json").read_text(encoding="utf-8"))
+        for url, v in data.items():
+            lookup[str(v.get("video_id"))] = (str(v.get("title", "")), str(url))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return lookup
+
+
+def _infer_language(files: list[dict]) -> str:
+    """从目录内 transcript_*.md 推断识别语言；语言功能前的 transcript.md 视为 auto。"""
+    for f in files:
+        m = re.match(r"^transcript_(.+)\.md$", f["name"])
+        if m:
+            return m.group(1)
+    if any(f["name"] == "transcript.md" for f in files):
+        return "auto"
+    return ""
+
+
+def _history_record(d: Path, lookup: dict) -> dict:
+    """把一个 output 目录转成历史记录条目（产物清单 + 元数据）。"""
+    vid = d.name
+    title, share_url = lookup.get(vid, ("", ""))
+    files = []
+    for p in d.iterdir():
+        if p.name.startswith(".") or not p.is_file() or p.is_symlink():
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue  # 扫描竞态（并发删除/无权限），跳过该文件
+        files.append({
+            "name": p.name,
+            "size": size,
+            "logic": manifest.logic_name_for(d, p.name),  # 可改名文件的逻辑名，否则 None
+        })
+    files.sort(key=lambda f: f["name"])
+    try:
+        time = int(d.stat().st_mtime)
+    except OSError:
+        time = 0
+    return {
+        "video_id": vid,
+        "title": title,
+        "share_url": share_url,
+        "language": _infer_language(files),
+        "time": time,
+        "files": files,
+    }
+
+
+def _remove_from_url_index(video_id: str) -> None:
+    """删除目录后同步清掉 .url_index.json 中该视频的链接条目（原子写）。
+
+    与 pipeline 的 _UrlIndex.record 共用全局锁，防并发写互踩/丢更新。
+    """
+    path = OUTPUT_DIR / ".url_index.json"
+    with url_index_lock:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return
+        cleaned = {url: v for url, v in data.items() if str(v.get("video_id")) != str(video_id)}
+        if len(cleaned) != len(data):
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(cleaned, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.replace(path)
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_page(request: Request):
+    """历史记录页：禁缓存，避免浏览器缓存旧页面。"""
+    return templates.TemplateResponse(
+        request,
+        "history.html",
+        {},
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
+
+
+@app.get("/api/history")
+def list_history():
+    """历史记录：扫描 output/ 数字目录，按提取时间倒序。
+
+    同步 def：FastAPI 自动放入线程池执行，避免阻塞事件循环（文件 IO 大时拖垮全服务）。
+    """
+    if not OUTPUT_DIR.is_dir():
+        return {"success": True, "records": []}
+    lookup = _load_title_index()
+    records = []
+    for d in OUTPUT_DIR.iterdir():
+        if d.is_dir() and d.name.isdigit() and not d.is_symlink():
+            records.append(_history_record(d, lookup))
+    records.sort(key=lambda r: r["time"], reverse=True)
+    return {"success": True, "records": records}
+
+
+@app.delete("/api/history/{video_id}")
+async def delete_history(video_id: str):
+    """彻底删除：移除 output/{video_id}/ 并清 .url_index.json 对应条目。"""
+    if not video_id.isdigit():
+        raise HTTPException(status_code=400, detail="无效的视频 ID")
+    folder = OUTPUT_DIR / video_id
+    if not folder.exists():
+        return {"success": True}
+    if folder.is_symlink():
+        raise HTTPException(status_code=400, detail="非法目录")  # 拒绝符号链接，防逃逸
+    try:
+        shutil.rmtree(folder)
+    except OSError:
+        raise HTTPException(status_code=500, detail="删除失败，请重试")
+    _remove_from_url_index(video_id)
+    return {"success": True}
+
+
+@app.put("/api/history/{video_id}/rename")
+async def rename_history_file(video_id: str, req: RenameRequest):
+    """改名目录内产物（仅限逻辑文件；扩展名保留，后端权威校验）。"""
+    if not video_id.isdigit():
+        raise HTTPException(status_code=400, detail="无效的视频 ID")
+    folder = OUTPUT_DIR / video_id
+    if not folder.is_dir() or folder.is_symlink():
+        raise HTTPException(status_code=404, detail="目录不存在")
+    logic = manifest.logic_name_for(folder, req.name)
+    if logic is None:
+        raise HTTPException(status_code=400, detail="该文件不支持改名")
+    try:
+        path = manifest.rename_file(folder, logic, req.newName)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, "name": path.name, "logic": logic}
 
 
 def main():
