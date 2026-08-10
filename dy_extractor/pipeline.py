@@ -63,7 +63,7 @@ def _format_transcript(info: douyin.VideoInfo, text: str, language: str) -> str:
         f"| 视频ID | `{info.video_id}` |\n"
         f"| 识别语言 | {language} |\n"
         f"| 提取时间 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} |\n"
-        f"| 下载链接 | [点击下载]({info.url}) |\n\n"
+        f"| 原视频 | [在抖音查看](https://www.douyin.com/video/{info.video_id}) |\n\n"
         f"---\n\n"
         f"## 文案内容\n\n{text}\n"
     )
