@@ -91,7 +91,7 @@ def parse_share_url(share_text: str) -> VideoInfo:
     return VideoInfo(video_id=video_id, title=desc, url=video_url)
 
 
-def download_video(video_info: VideoInfo, output_dir: Path, retries: int = 3) -> Path:
+def download_video(video_info: VideoInfo, output_dir: Path, retries: int = 3, progress=None) -> Path:
     """下载无水印视频到指定目录，返回文件路径。
 
     文件名统一用 video.mp4（与 WebUI 下载接口、README 约定一致）。
@@ -101,6 +101,10 @@ def download_video(video_info: VideoInfo, output_dir: Path, retries: int = 3) ->
     2. 写入字节数与响应头 Content-Length 比对，不一致视为下载不完整；
     3. 任何异常（网络中断、HTTP 错误、不完整）都会删除残文件并自动重试；
     4. 重试耗尽仍失败则抛错——绝不把残缺文件当成功结果返回。
+
+    progress: 可选回调 progress(written, total)，下载中定期触发（有 Content-Length
+        时按每 1% 节流；未知总大小时按每 2MB 触发、total 传 None）。下载完成时补
+        一次收尾回调，保证前端进度条走满。
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     filepath = output_dir / "video.mp4"
@@ -112,15 +116,34 @@ def download_video(video_info: VideoInfo, output_dir: Path, retries: int = 3) ->
             response.raise_for_status()
 
             expected = response.headers.get("Content-Length")
+            expected_int = int(expected) if expected else None
             written = 0
+            last_reported = -1
             with open(filepath, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         written += len(chunk)
+                        if progress:
+                            if expected_int:
+                                # 有总大小：按百分比节流（每跨过 1% 回调一次）
+                                pct = written * 100 // expected_int
+                                if pct != last_reported:
+                                    last_reported = pct
+                                    progress(written, expected_int)
+                            else:
+                                # 无总大小（无 Content-Length）：每 2MB 回调一次
+                                bucket = written // (2 * 1024 * 1024)
+                                if bucket != last_reported:
+                                    last_reported = bucket
+                                    progress(written, None)
 
-            if expected is not None and written != int(expected):
-                raise RuntimeError(f"下载不完整: 期望 {expected} 字节, 实际 {written} 字节")
+            if progress:
+                # 收尾回调：保证前端进度条走满（total 未知时传 written，前端算成 100%）
+                progress(written, expected_int or written)
+
+            if expected_int is not None and written != expected_int:
+                raise RuntimeError(f"下载不完整: 期望 {expected_int} 字节, 实际 {written} 字节")
             return filepath
         except Exception as e:
             filepath.unlink(missing_ok=True)

@@ -147,6 +147,30 @@
         $('mediaAudio').classList.remove('hidden');
     }
 
+    // ---- 下载进度条 ----
+    function fmtMB(b) { return (b / 1048576).toFixed(0) + ' MB'; }
+    function showDownloadProgress(d) {
+        $('downloadProgress').classList.remove('hidden');
+        var bar = $('downloadBar');
+        if (d.percent != null) {
+            // 已知总大小：走确定进度条
+            $('downloadProgress').classList.remove('indeterminate');
+            bar.style.width = d.percent + '%';
+            var info = d.downloaded ? '（' + fmtMB(d.downloaded) + ' / ' + fmtMB(d.total) + '）' : '';
+            $('downloadText').textContent = '下载中 ' + d.percent + '%' + info;
+        } else {
+            // 未知总大小（无 Content-Length）：走滑动动画
+            $('downloadProgress').classList.add('indeterminate');
+            bar.style.width = '';
+            $('downloadText').textContent = '下载中 ' + (d.downloaded ? fmtMB(d.downloaded) : '…');
+        }
+    }
+    function hideDownloadProgress() {
+        $('downloadProgress').classList.add('hidden');
+        $('downloadProgress').classList.remove('indeterminate');
+        $('downloadBar').style.width = '0%';
+    }
+
     // 识别完成：展示文案与下载入口
     function finishExtract(d) {
         state.videoInfo = { video_id: d.video_id, title: d.title };
@@ -231,9 +255,15 @@
                     state.step = 1; renderSteps();
                     $('loadingText').textContent = '正在解析分享链接...';
                     break;
-                case 'video_ready':
-                    showVideo(d);
+                case 'download':
                     state.step = 2; renderSteps();
+                    $('loadingText').textContent = '正在下载无水印视频...';
+                    showDownloadProgress(d);
+                    break;
+                case 'video_ready':
+                    hideDownloadProgress();
+                    showVideo(d);
+                    state.step = 3; renderSteps();
                     $('loadingText').textContent = '视频已就绪，正在提取音频...';
                     break;
                 case 'audio_ready':
@@ -263,6 +293,7 @@
         state.loading = true;
         syncInput();
         showLoading('正在解析分享链接...');
+        hideDownloadProgress();
         state.step = 0;
         renderSteps();
 

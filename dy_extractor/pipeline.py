@@ -239,7 +239,11 @@ def extract(
             p.unlink(missing_ok=True)
         audio_path.unlink(missing_ok=True)
         video_path.unlink(missing_ok=True)
-        video_path = douyin.download_video(info, out)
+        def _on_download_progress(written, total):
+            percent = int(written * 100 / total) if total else None
+            emit("download", downloaded=written, total=total, percent=percent)
+
+        video_path = douyin.download_video(info, out, progress=_on_download_progress)
         if not media_is_complete(video_path):
             video_path.unlink(missing_ok=True)
             raise RuntimeError("下载后的视频仍校验不完整，已删除，请重试该链接")
