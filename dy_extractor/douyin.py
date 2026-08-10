@@ -33,6 +33,17 @@ _ROUTER_DATA_RE = re.compile(r"window\._ROUTER_DATA\s*=\s*(.*?)</script>", re.DO
 # 文件名中的非法字符
 _ILLEGAL_CHARS = re.compile(r'[\\/:*?"<>|]')
 
+# SSRF 防护：解析阶段只允许请求抖音系域名，拒绝内网/回环/任意地址
+_DOUYIN_HOSTS = ("douyin.com", "iesdouyin.com")
+
+
+def _assert_douyin_host(url: str) -> None:
+    """校验 URL 主机属于抖音系域名，否则抛 ValueError（SSRF 防护）。"""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    if not host or not any(host == d or host.endswith("." + d) for d in _DOUYIN_HOSTS):
+        raise ValueError("仅支持抖音分享链接")
+
 
 @dataclass
 class VideoInfo:
@@ -58,6 +69,7 @@ def parse_share_url(share_text: str) -> VideoInfo:
     share_url = extract_share_url(share_text)
     if not share_url:
         raise ValueError("未找到有效的分享链接")
+    _assert_douyin_host(share_url)  # SSRF 防护：拒绝内网/回环/任意域名
 
     share_response = requests.get(share_url, headers=HEADERS, timeout=30)
     video_id = share_response.url.split("?")[0].strip("/").split("/")[-1]
