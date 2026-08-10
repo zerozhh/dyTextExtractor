@@ -36,6 +36,7 @@ downloads/
 *.mp3
 *.wav
 
-# ===== 日志 =====
+# ===== 日志与文档 =====
 *.log
 logs/
+docs/
