@@ -14,8 +14,10 @@ import json
 import re
 import shutil
 import sys
+import tempfile
 import threading
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 # 把项目根目录加入路径，保证以任意目录启动都能 import
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -25,6 +27,7 @@ from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 import uvicorn
 
 from dy_extractor import douyin, manifest, pipeline
@@ -392,14 +395,23 @@ def _infer_language(files: list[dict]) -> str:
     return ""
 
 
+def _product_files(folder: Path):
+    """枚举产物目录内的交付文件：跳过隐藏（.files.json 等内部态）、目录、symlink。
+
+    历史列表（_history_record）与一键打包共用——「打包的就是列表展示的集合」。
+    """
+    for p in folder.iterdir():
+        if p.name.startswith(".") or not p.is_file() or p.is_symlink():
+            continue
+        yield p
+
+
 def _history_record(d: Path, lookup: dict) -> dict:
     """把一个 output 目录转成历史记录条目（产物清单 + 元数据）。"""
     vid = d.name
     title, share_url = lookup.get(vid, ("", ""))
     files = []
-    for p in d.iterdir():
-        if p.name.startswith(".") or not p.is_file() or p.is_symlink():
-            continue
+    for p in _product_files(d):
         try:
             size = p.stat().st_size
         except OSError:
@@ -504,6 +516,54 @@ async def rename_history_file(video_id: str, req: RenameRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"success": True, "name": path.name, "logic": logic}
+
+
+# 文本产物用 deflate；mp4/mp3 已是高度压缩格式，STORED 避免重复压缩白耗 CPU
+_ZIP_DEFLATE_EXT = {".md", ".srt", ".txt", ".json"}
+
+
+def _zip_compression(p: Path) -> int:
+    """按扩展名选 zip 压缩方式：文本 deflate，媒体 store。"""
+    return ZIP_DEFLATED if p.suffix.lower() in _ZIP_DEFLATE_EXT else ZIP_STORED
+
+
+@app.get("/api/history/{video_id}/download")
+def download_history_zip(video_id: str):
+    """一键打包：把一条历史记录的全部产物压缩为一个 zip 下载。
+
+    第一性原理：详情页展示的产物集合 = 要交付的集合。zip 条目用磁盘实际名
+    （改名后的名字即交付名）；纯只读，不改产物。同步 def：自动入线程池，
+    大视频打包不阻塞事件循环。
+    """
+    if not video_id.isdigit():
+        raise HTTPException(status_code=400, detail="无效的视频 ID")
+    folder = OUTPUT_DIR / video_id
+    if not folder.is_dir() or folder.is_symlink():
+        raise HTTPException(status_code=404, detail="记录不存在")
+
+    files = sorted(_product_files(folder), key=lambda p: p.name)
+    if not files:
+        raise HTTPException(status_code=404, detail="该记录没有可打包的文件")
+
+    tmp = tempfile.NamedTemporaryFile(prefix=f"dz_{video_id}_", suffix=".zip", delete=False)
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    try:
+        with ZipFile(tmp_path, "w") as zf:
+            for p in files:
+                if not p.is_file():  # 并发改名/删除竞态：缺失就跳过，不中断打包
+                    continue
+                zf.write(p, arcname=p.name, compress_type=_zip_compression(p))
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+    return FileResponse(
+        tmp_path,
+        media_type="application/zip",
+        filename=f"{video_id}.zip",
+        background=BackgroundTask(lambda: tmp_path.unlink(missing_ok=True)),
+    )
 
 
 def main():

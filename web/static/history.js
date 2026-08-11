@@ -365,6 +365,21 @@
             .catch(function () { toast('网络错误，删除失败'); });
     }
 
+    // ---- 一键打包：把这条记录的全部产物压缩下载 ----
+    function downloadZipAll() {
+        if (!state.selected) return;
+        var btn = $('btnZipAll');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = '打包中…';
+        setTimeout(function () {  // 浏览器下载无回调，定时兜底恢复按钮
+            btn.disabled = false;
+            btn.textContent = '⬇ 打包全部';
+        }, 8000);
+        window.location.href = '/api/history/' + state.selected.video_id + '/download';
+    }
+    $('btnZipAll').addEventListener('click', downloadZipAll);
+
     // ---- 事件绑定 ----
     $('searchInput').addEventListener('input', function () {
         state.filter = this.value;
