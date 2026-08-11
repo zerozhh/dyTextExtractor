@@ -408,10 +408,34 @@
     }
 
     // ---- 复制（当前视图）----
+    // 第一性原理：Clipboard API 仅在安全上下文（HTTPS/localhost/127.0.0.1）可用。
+    // 通过局域网 IP + HTTP 访问时 navigator.clipboard 为 undefined，直接 writeText
+    // 会同步抛 TypeError，.catch() 捕获不到，表现为点击无反应。故先做特性检测，
+    // 非安全上下文降级用 textarea + execCommand('copy')（须在用户激活的 click 中调用）。
+    function copyToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text);
+        }
+        return new Promise(function (resolve, reject) {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-1000px';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, ta.value.length);
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            document.body.removeChild(ta);
+            ok ? resolve() : reject(new Error('execCommand copy failed'));
+        });
+    }
     $('btnCopy').addEventListener('click', function () {
         var text = state.currentView === 'formatted' ? state.formattedText : state.transcript;
         if (!text) return;
-        navigator.clipboard.writeText(text).then(function () {
+        copyToClipboard(text).then(function () {
             toast('已复制到剪贴板');
         }).catch(function () { toast('复制失败，请手动选择'); });
     });
