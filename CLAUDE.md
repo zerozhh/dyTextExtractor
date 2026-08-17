@@ -39,6 +39,16 @@ DeepSeek AI 排版。WebUI + CLI 双入口，产物存 `output/{视频ID}/`。
 - 启动 WebUI：`uv run python web/app.py`（默认 0.0.0.0:8080，局域网可访问）
   只本机：`uv run python web/app.py 127.0.0.1`（argv[1]=host，argv[2]=port）
 - CLI：`uv run python main.py [分享链接]`（无链接则交互式粘贴）
+- Docker：`docker compose up -d --build`（OrbStack；DaoCloud 镜像源 + 清华 PyPI 源）。
+  容器内 ffmpeg 来自 PyPI `imageio-ffmpeg` 静态二进制（软链到 PATH），**不能**
+  挂宿主 brew ffmpeg——macOS 二进制在 Linux 容器不可执行（OrbStack 同样拒绝）。
+  注意 `imageio-ffmpeg` **只含 ffmpeg、不含 ffprobe**——`media.py` 的完整性
+  校验因此只依赖 ffmpeg（`-c copy` 流拷贝等价于 ffprobe 逐包扫描），勿改回
+  ffprobe（2026-08 踩坑：容器内无 ffprobe 被误判「校验不完整」，删完好视频）。
+  `imageio-ffmpeg` / `watchfiles` 只装进镜像（Dockerfile 内 `uv pip install`），
+  不进 pyproject，维持 6 依赖约束。venv 在镜像内 `/opt/venv`（非 `/app/.venv`，
+  防挂载覆盖）。uvicorn `--reload` 只盯 `dy_extractor/` 与 `web/`，output/ 写入
+  不触发重启；`WATCHFILES_FORCE_POLLING=1` 保证挂载盘上监听可靠。
 - `tests/` 在 .gitignore 中，`.venv` 未装 pytest；本地验证用临时测试脚本，不上 CI。
 
 ## 外部服务知识
