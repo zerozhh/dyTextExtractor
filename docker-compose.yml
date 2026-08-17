@@ -1,0 +1,29 @@
+# dyTextExtractor 容器部署（开发模式：改本地代码，容器内自动重启生效）
+#
+#   docker compose up -d --build   # 启动（依赖变更后同样用这条重建）
+#   docker compose logs -f         # 看日志
+#   docker compose restart         # 手动重启
+#   docker compose down            # 停止
+#
+# 工作方式：整个项目目录 bind mount 进容器 /app，uvicorn --reload 监听
+# dy_extractor/ 与 web/ 的改动——本地保存文件，容器进程即自动重启加载；
+# output/ 产物直接落在本机磁盘；.env 随目录挂载进容器（密钥不进镜像）。
+
+services:
+  dytext:
+    build:
+      context: .
+      args:
+        # 基础镜像国内源；不可用时在 .env 里配 BASE_IMAGE=<镜像源>/library/python:3.12-slim 覆盖
+        BASE_IMAGE: ${BASE_IMAGE:-docker.m.daocloud.io/library/python:3.12-slim}
+    image: dytext-extractor:latest
+    container_name: dytext-extractor
+    ports:
+      # 宿主 8080 被本地 WebUI 占用时，在 .env 里配 HOST_PORT=8081 换端口
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      - .:/app
+    environment:
+      # OrbStack 挂载盘上 inotify 事件不完全可靠，强制轮询保证 --reload 稳定触发
+      WATCHFILES_FORCE_POLLING: "1"
+    restart: unless-stopped

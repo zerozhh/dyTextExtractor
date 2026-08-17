@@ -1,0 +1,12 @@
+# 构建上下文瘦身 + 密钥隔离：.env 只通过 compose 挂载进容器，绝不打进镜像
+.git
+.venv
+.env
+.claude
+.pytest_cache
+__pycache__
+*.pyc
+tests
+docs
+output
+.DS_Store

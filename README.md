@@ -48,6 +48,18 @@ uv run python main.py                        # 交互式粘贴链接
 uv run python main.py "https://v.douyin.com/xxxxx"   # 直接传链接
 ```
 
+### 🐳 Docker 部署（OrbStack / Docker Compose）
+
+镜像走 DaoCloud 镜像源 + 清华 PyPI 源，不安装任何系统包——容器内的 ffmpeg 用 PyPI `imageio-ffmpeg` 自带的静态 Linux 二进制（宿主机 brew 装的是 macOS 二进制，容器内无法执行，故不能复用）。
+
+```bash
+docker compose up -d --build    # 启动/依赖变更后重建
+docker compose logs -f          # 看日志
+docker compose down             # 停止
+```
+
+开发模式：项目目录整体挂载进容器，本地改 `dy_extractor/` 或 `web/` 下的代码，容器进程自动重启生效；`output/` 产物与 `.env` 直接用本机磁盘文件，密钥不进镜像。宿主 8080 被占用时在 `.env` 配 `HOST_PORT=8081`；基础镜像源失效时配 `BASE_IMAGE=<源>/library/python:3.12-slim`。
+
 ## 📖 使用
 
 1. 复制抖音分享链接，点「📋 粘贴」填入
