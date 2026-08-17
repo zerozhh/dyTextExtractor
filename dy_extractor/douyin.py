@@ -71,11 +71,24 @@ def parse_share_url(share_text: str) -> VideoInfo:
         raise ValueError("未找到有效的分享链接")
     _assert_douyin_host(share_url)  # SSRF 防护：拒绝内网/回环/任意域名
 
-    share_response = requests.get(share_url, headers=HEADERS, timeout=30)
+    # 两跳共用 Session 跨跳保留 cookie：抖音分享页已校验 ttwid（2026-08 实测），
+    # 无该 cookie 时返回只有风控元数据的空壳页（loaderData 无 videoInfoRes），
+    # 表现为「出错了：videoInfoRes」
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    share_response = session.get(share_url, timeout=30)
+    # 直接贴完整链接（douyin.com/video/...）时无短链跳转、第一跳不种 ttwid，
+    # 预热 iesdouyin 主页补种；短链场景第一跳已自带，跳过不多花请求
+    if "ttwid" not in session.cookies:
+        try:
+            session.get("https://www.iesdouyin.com/", timeout=30)
+        except requests.RequestException:
+            pass  # 预热失败不阻断，仍尝试分享页
     video_id = share_response.url.split("?")[0].strip("/").split("/")[-1]
     share_url = f"https://www.iesdouyin.com/share/video/{video_id}"
 
-    response = requests.get(share_url, headers=HEADERS, timeout=30)
+    response = session.get(share_url, timeout=30)
     response.raise_for_status()
 
     match = _ROUTER_DATA_RE.search(response.text)
@@ -87,11 +100,14 @@ def parse_share_url(share_text: str) -> VideoInfo:
     NOTE_ID_PAGE_KEY = "note_(id)/page"
 
     if VIDEO_ID_PAGE_KEY in json_data["loaderData"]:
-        original_video_info = json_data["loaderData"][VIDEO_ID_PAGE_KEY]["videoInfoRes"]
+        page_data = json_data["loaderData"][VIDEO_ID_PAGE_KEY]
     elif NOTE_ID_PAGE_KEY in json_data["loaderData"]:
-        original_video_info = json_data["loaderData"][NOTE_ID_PAGE_KEY]["videoInfoRes"]
+        page_data = json_data["loaderData"][NOTE_ID_PAGE_KEY]
     else:
         raise ValueError("无法从JSON中解析视频或图集信息")
+    if "videoInfoRes" not in page_data:
+        raise ValueError("分享页未返回视频数据（可能触发抖音风控），请稍后重试")
+    original_video_info = page_data["videoInfoRes"]
 
     data = original_video_info["item_list"][0]
 
